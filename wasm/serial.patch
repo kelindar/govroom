@@ -1,0 +1,659 @@
+diff --git a/src/problems/tsp/heuristics/local_search.cpp b/src/problems/tsp/heuristics/local_search.cpp
+index 96a2c42..3cf0118 100644
+--- a/src/problems/tsp/heuristics/local_search.cpp
++++ b/src/problems/tsp/heuristics/local_search.cpp
+@@ -11,7 +11,6 @@ All rights reserved (see LICENSE).
+ #include <iterator>
+ #include <numeric>
+ #include <ranges>
+-#include <thread>
+ #include <unordered_map>
+ 
+ #include "problems/tsp/heuristics/local_search.h"
+@@ -169,20 +168,12 @@ UserCost LocalSearch::relocate_step() {
+   std::vector<Index> best_edge_1_starts(_nb_threads);
+   std::vector<Index> best_edge_2_starts(_nb_threads);
+ 
+-  std::vector<std::jthread> threads;
+-  threads.reserve(_nb_threads);
+-
+   for (std::size_t i = 0; i < _nb_threads; ++i) {
+-    threads.emplace_back(look_up,
+-                         _rank_limits[i],
+-                         _rank_limits[i + 1],
+-                         std::ref(best_gains[i]),
+-                         std::ref(best_edge_1_starts[i]),
+-                         std::ref(best_edge_2_starts[i]));
+-  }
+-
+-  for (auto& t : threads) {
+-    t.join();
++    look_up(_rank_limits[i],
++            _rank_limits[i + 1],
++            std::ref(best_gains[i]),
++            std::ref(best_edge_1_starts[i]),
++            std::ref(best_edge_2_starts[i]));
+   }
+ 
+   // Spot best gain found among all threads.
+@@ -431,22 +422,12 @@ UserCost LocalSearch::two_opt_step() {
+   std::vector<Index> best_edge_1_starts(_nb_threads);
+   std::vector<Index> best_edge_2_starts(_nb_threads);
+ 
+-  // Start other threads, keeping a piece of the range for the main
+-  // thread.
+-  std::vector<std::jthread> threads;
+-  threads.reserve(_nb_threads);
+-
+   for (std::size_t i = 0; i < _nb_threads; ++i) {
+-    threads.emplace_back(look_up,
+-                         _sym_two_opt_rank_limits[i],
+-                         _sym_two_opt_rank_limits[i + 1],
+-                         std::ref(best_gains[i]),
+-                         std::ref(best_edge_1_starts[i]),
+-                         std::ref(best_edge_2_starts[i]));
+-  }
+-
+-  for (auto& t : threads) {
+-    t.join();
++    look_up(_sym_two_opt_rank_limits[i],
++            _sym_two_opt_rank_limits[i + 1],
++            std::ref(best_gains[i]),
++            std::ref(best_edge_1_starts[i]),
++            std::ref(best_edge_2_starts[i]));
+   }
+ 
+   // Spot best gain found among all threads.
+@@ -569,20 +550,12 @@ UserCost LocalSearch::asym_two_opt_step() {
+   }
+   limit_nodes.push_back(init);
+ 
+-  std::vector<std::jthread> threads;
+-  threads.reserve(_nb_threads);
+-
+   for (std::size_t i = 0; i < _nb_threads; ++i) {
+-    threads.emplace_back(look_up,
+-                         limit_nodes[i],
+-                         limit_nodes[i + 1],
+-                         std::ref(best_gains[i]),
+-                         std::ref(best_edge_1_starts[i]),
+-                         std::ref(best_edge_2_starts[i]));
+-  }
+-
+-  for (auto& t : threads) {
+-    t.join();
++    look_up(limit_nodes[i],
++            limit_nodes[i + 1],
++            std::ref(best_gains[i]),
++            std::ref(best_edge_1_starts[i]),
++            std::ref(best_edge_2_starts[i]));
+   }
+ 
+   // Spot best gain found among all threads.
+@@ -707,20 +680,12 @@ UserCost LocalSearch::or_opt_step() {
+   std::vector<Index> best_edge_1_starts(_nb_threads);
+   std::vector<Index> best_edge_2_starts(_nb_threads);
+ 
+-  std::vector<std::jthread> threads;
+-  threads.reserve(_nb_threads);
+-
+   for (std::size_t i = 0; i < _nb_threads; ++i) {
+-    threads.emplace_back(look_up,
+-                         _rank_limits[i],
+-                         _rank_limits[i + 1],
+-                         std::ref(best_gains[i]),
+-                         std::ref(best_edge_1_starts[i]),
+-                         std::ref(best_edge_2_starts[i]));
+-  }
+-
+-  for (auto& t : threads) {
+-    t.join();
++    look_up(_rank_limits[i],
++            _rank_limits[i + 1],
++            std::ref(best_gains[i]),
++            std::ref(best_edge_1_starts[i]),
++            std::ref(best_edge_2_starts[i]));
+   }
+ 
+   // Spot best gain found among all threads.
+diff --git a/src/problems/vrp.h b/src/problems/vrp.h
+index 57a4af8..df015f9 100644
+--- a/src/problems/vrp.h
++++ b/src/problems/vrp.h
+@@ -15,7 +15,6 @@ All rights reserved (see LICENSE).
+ #include <numeric>
+ #include <ranges>
+ #include <set>
+-#include <thread>
+ 
+ #include "algorithms/heuristics/heuristics.h"
+ #include "algorithms/local_search/local_search.h"
+@@ -199,59 +198,19 @@ protected:
+ 
+     SolvingContext<Route> context(_input, nb_searches);
+ 
+-    std::exception_ptr ep = nullptr;
+-    std::mutex ep_m;
+-
+-    const auto actual_nb_threads = std::min(nb_searches, nb_threads);
+-    assert(actual_nb_threads <= 32);
+-    std::counting_semaphore<32> semaphore(actual_nb_threads);
+-
++    assert(nb_threads == 1);
+     Timeout search_time;
+     if (timeout.has_value()) {
+-      // Max number of solving per thread.
+-      const auto dv = std::div(static_cast<long>(nb_searches),
+-                               static_cast<long>(actual_nb_threads));
+-      const unsigned max_solving_number = dv.quot + ((dv.rem == 0) ? 0 : 1);
+-      search_time = timeout.value() / max_solving_number;
+-    }
+-
+-    auto run_solving = [&context,
+-                        &semaphore,
+-                        &search_time,
+-                        &parameters,
+-                        &timeout,
+-                        &ep,
+-                        &ep_m,
+-                        depth,
+-                        this](const unsigned rank) {
+-      semaphore.acquire();
+-      try {
+-        run_single_search<Route, LocalSearch>(_input,
+-                                              parameters[rank],
+-                                              rank,
+-                                              depth,
+-                                              search_time,
+-                                              context);
+-      } catch (...) {
+-        const std::scoped_lock<std::mutex> lock(ep_m);
+-        ep = std::current_exception();
+-      }
+-      semaphore.release();
+-    };
+-
+-    std::vector<std::jthread> solving_threads;
+-    solving_threads.reserve(nb_searches);
+-
+-    for (unsigned i = 0; i < nb_searches; ++i) {
+-      solving_threads.emplace_back(run_solving, i);
+-    }
+-
+-    for (auto& t : solving_threads) {
+-      t.join();
++      search_time = timeout.value() / nb_searches;
+     }
+ 
+-    if (ep != nullptr) {
+-      std::rethrow_exception(ep);
++    for (unsigned rank = 0; rank < nb_searches; ++rank) {
++      run_single_search<Route, LocalSearch>(_input,
++                                            parameters[rank],
++                                            rank,
++                                            depth,
++                                            search_time,
++                                            context);
+     }
+ 
+     auto best_indic = std::min_element(context.sol_indicators.cbegin(),
+diff --git a/src/routing/wrapper.h b/src/routing/wrapper.h
+index ce1b380..e8cd77f 100644
+--- a/src/routing/wrapper.h
++++ b/src/routing/wrapper.h
+@@ -11,7 +11,6 @@ All rights reserved (see LICENSE).
+ */
+ 
+ #include <mutex>
+-#include <thread>
+ #include <vector>
+ 
+ #include "structures/generic/matrix.h"
+@@ -38,65 +37,41 @@ public:
+     const std::size_t m_size = locs.size();
+     Matrices m(m_size);
+ 
+-    std::exception_ptr ep = nullptr;
+-    std::mutex ep_m;
+     std::mutex matrix_m;
++    for (Index v_rank = 0; v_rank < vehicles.size(); ++v_rank) {
++      const Vehicle& v = vehicles[v_rank];
++      if (v.profile != profile) {
++        continue;
++      }
+ 
+-    auto run_on_vehicle_at_rank =
+-      [this, &vehicles, &jobs, &matrix_m, &m, &vehicles_geometry, &ep_m, &ep](
+-        Index v_rank) {
+-        try {
+-          const Vehicle& v = vehicles[v_rank];
+-
+-          std::vector<Location> route_locs;
+-          route_locs.reserve(v.steps.size());
+-
+-          bool has_job_steps = false;
+-
+-          if (v.has_start()) {
+-            route_locs.push_back(v.start.value());
+-          }
+-
+-          for (const auto& step : v.steps) {
+-            if (step.type == STEP_TYPE::JOB) {
+-              has_job_steps = true;
+-              route_locs.push_back(jobs[step.rank].location);
+-            }
+-          }
+-
+-          if (v.has_end()) {
+-            route_locs.push_back(v.end.value());
+-          }
+-
+-          if (has_job_steps) {
+-            assert(route_locs.size() >= 2);
+-
+-            this->update_sparse_matrix(route_locs,
+-                                       m,
+-                                       matrix_m,
+-                                       vehicles_geometry[v_rank]);
+-          }
+-        } catch (...) {
+-          const std::scoped_lock<std::mutex> lock(ep_m);
+-          ep = std::current_exception();
+-        }
+-      };
++      std::vector<Location> route_locs;
++      route_locs.reserve(v.steps.size());
+ 
+-    std::vector<std::jthread> vehicles_threads;
+-    vehicles_threads.reserve(vehicles.size());
++      bool has_job_steps = false;
+ 
+-    for (Index v_rank = 0; v_rank < vehicles.size(); ++v_rank) {
+-      if (vehicles[v_rank].profile == this->profile) {
+-        vehicles_threads.emplace_back(run_on_vehicle_at_rank, v_rank);
++      if (v.has_start()) {
++        route_locs.push_back(v.start.value());
+       }
+-    }
+ 
+-    for (auto& t : vehicles_threads) {
+-      t.join();
+-    }
++      for (const auto& step : v.steps) {
++        if (step.type == STEP_TYPE::JOB) {
++          has_job_steps = true;
++          route_locs.push_back(jobs[step.rank].location);
++        }
++      }
++
++      if (v.has_end()) {
++        route_locs.push_back(v.end.value());
++      }
++
++      if (has_job_steps) {
++        assert(route_locs.size() >= 2);
+ 
+-    if (ep != nullptr) {
+-      std::rethrow_exception(ep);
++        this->update_sparse_matrix(route_locs,
++                                   m,
++                                   matrix_m,
++                                   vehicles_geometry[v_rank]);
++      }
+     }
+ 
+     return m;
+diff --git a/src/structures/typedefs.h b/src/structures/typedefs.h
+index 60b0733..ce3ace8 100644
+--- a/src/structures/typedefs.h
++++ b/src/structures/typedefs.h
+@@ -14,6 +14,7 @@ All rights reserved (see LICENSE).
+ #include <array>
+ #include <cassert>
+ #include <chrono>
++#include <iterator>
+ #include <limits>
+ #include <list>
+ #include <optional>
+diff --git a/src/structures/vroom/input/input.cpp b/src/structures/vroom/input/input.cpp
+index 048e234..95f7404 100644
+--- a/src/structures/vroom/input/input.cpp
++++ b/src/structures/vroom/input/input.cpp
+@@ -9,8 +9,6 @@ All rights reserved (see LICENSE).
+ 
+ #include <algorithm>
+ #include <mutex>
+-#include <semaphore>
+-#include <thread>
+ 
+ #if USE_LIBOSRM
+ #include "osrm/exception.hpp"
+@@ -1017,7 +1015,7 @@ routing::Matrices Input::get_matrices_by_profile(const std::string& profile,
+                         : (*rw)->get_matrices(_locations);
+ }
+ 
+-void Input::set_matrices(unsigned nb_thread, bool sparse_filling) {
++void Input::set_matrices(unsigned /* nb_thread */, bool sparse_filling) {
+   if ((!_durations_matrices.empty() || !_distances_matrices.empty() ||
+        !_costs_matrices.empty()) &&
+       !_has_custom_location_index) {
+@@ -1046,147 +1044,107 @@ void Input::set_matrices(unsigned nb_thread, bool sparse_filling) {
+     }
+   }
+ 
+-  // Split computing matrices across threads based on number of
+-  // profiles.
+-  const auto nb_buckets =
+-    std::min(nb_thread, static_cast<unsigned>(_profiles.size()));
+-
+-  std::vector<std::vector<std::string>>
+-    thread_profiles(nb_buckets, std::vector<std::string>());
+-
+-  std::size_t t_rank = 0;
+   for (const auto& profile : _profiles) {
+-    thread_profiles[t_rank % nb_buckets].push_back(profile);
+-    ++t_rank;
+-
+     init_missing_matrices(profile);
+   }
+ 
+-  std::exception_ptr ep = nullptr;
+-  std::mutex ep_m;
+-  std::mutex cost_bound_m;
+-
+-  auto run_on_profiles = [&](const std::vector<std::string>& profiles) {
+-    try {
+-      for (const auto& profile : profiles) {
+-        auto durations_m = _durations_matrices.find(profile);
+-        auto distances_m = _distances_matrices.find(profile);
+-
+-        // Required matrices not manually set have been defined as
+-        // empty above in init_missing_matrices.
+-        assert(durations_m != _durations_matrices.end());
+-        assert(distances_m != _distances_matrices.end());
+-        const bool define_durations = (durations_m->second.size() == 0);
+-        const bool define_distances = (distances_m->second.size() == 0);
+-        assert(!define_durations || define_distances);
+-
+-        if (define_durations || define_distances) {
+-          if (_locations.size() == 1 && !sparse_filling) {
+-            durations_m->second = Matrix<UserDuration>(1);
+-            distances_m->second = Matrix<UserDistance>(1);
+-          } else {
+-            auto matrices = get_matrices_by_profile(profile, sparse_filling);
++  for (const auto& profile : _profiles) {
++    auto durations_m = _durations_matrices.find(profile);
++    auto distances_m = _distances_matrices.find(profile);
++
++    // Required matrices not manually set have been defined as
++    // empty above in init_missing_matrices.
++    assert(durations_m != _durations_matrices.end());
++    assert(distances_m != _distances_matrices.end());
++    const bool define_durations = (durations_m->second.size() == 0);
++    const bool define_distances = (distances_m->second.size() == 0);
++    assert(!define_durations || define_distances);
++
++    if (define_durations || define_distances) {
++      if (_locations.size() == 1 && !sparse_filling) {
++        durations_m->second = Matrix<UserDuration>(1);
++        distances_m->second = Matrix<UserDistance>(1);
++      } else {
++        auto matrices = get_matrices_by_profile(profile, sparse_filling);
+ 
+-            if (!_has_custom_location_index) {
+-              // Location indices are set based on order in _locations.
+-              if (define_durations) {
+-                durations_m->second = std::move(matrices.durations);
+-              }
+-              if (define_distances) {
+-                distances_m->second = std::move(matrices.distances);
+-              }
+-            } else {
+-              // Location indices are provided in input so we need an
+-              // indirection based on order in _locations.
+-              if (define_durations) {
+-                Matrix<UserDuration> full_m(_max_matrices_used_index + 1);
+-                for (Index i = 0; i < _locations.size(); ++i) {
+-                  const auto& loc_i = _locations[i];
+-                  for (Index j = 0; j < _locations.size(); ++j) {
+-                    full_m[loc_i.index()][_locations[j].index()] =
+-                      matrices.durations[i][j];
+-                  }
+-                }
+-
+-                durations_m->second = std::move(full_m);
+-              }
+-              if (define_distances) {
+-                Matrix<UserDistance> full_m(_max_matrices_used_index + 1);
+-                for (Index i = 0; i < _locations.size(); ++i) {
+-                  const auto& loc_i = _locations[i];
+-                  for (Index j = 0; j < _locations.size(); ++j) {
+-                    full_m[loc_i.index()][_locations[j].index()] =
+-                      matrices.distances[i][j];
+-                  }
+-                }
+-
+-                distances_m->second = std::move(full_m);
++        if (!_has_custom_location_index) {
++          // Location indices are set based on order in _locations.
++          if (define_durations) {
++            durations_m->second = std::move(matrices.durations);
++          }
++          if (define_distances) {
++            distances_m->second = std::move(matrices.distances);
++          }
++        } else {
++          // Location indices are provided in input so we need an
++          // indirection based on order in _locations.
++          if (define_durations) {
++            Matrix<UserDuration> full_m(_max_matrices_used_index + 1);
++            for (Index i = 0; i < _locations.size(); ++i) {
++              const auto& loc_i = _locations[i];
++              for (Index j = 0; j < _locations.size(); ++j) {
++                full_m[loc_i.index()][_locations[j].index()] =
++                  matrices.durations[i][j];
+               }
+             }
++
++            durations_m->second = std::move(full_m);
+           }
+-        }
++          if (define_distances) {
++            Matrix<UserDistance> full_m(_max_matrices_used_index + 1);
++            for (Index i = 0; i < _locations.size(); ++i) {
++              const auto& loc_i = _locations[i];
++              for (Index j = 0; j < _locations.size(); ++j) {
++                full_m[loc_i.index()][_locations[j].index()] =
++                  matrices.distances[i][j];
++              }
++            }
+ 
+-        if (durations_m->second.size() <= _max_matrices_used_index) {
+-          throw InputException(
+-            "location_index exceeding durations matrix size for " + profile +
+-            " profile.");
++            distances_m->second = std::move(full_m);
++          }
+         }
++      }
++    }
+ 
+-        if (distances_m->second.size() <= _max_matrices_used_index) {
+-          throw InputException(
+-            "location_index exceeding distances matrix size for " + profile +
+-            " profile.");
+-        }
++    if (durations_m->second.size() <= _max_matrices_used_index) {
++      throw InputException(
++        "location_index exceeding durations matrix size for " + profile +
++        " profile.");
++    }
+ 
+-        const auto c_m = _costs_matrices.find(profile);
++    if (distances_m->second.size() <= _max_matrices_used_index) {
++      throw InputException(
++        "location_index exceeding distances matrix size for " + profile +
++        " profile.");
++    }
+ 
+-        if (c_m != _costs_matrices.end()) {
+-          if (c_m->second.size() <= _max_matrices_used_index) {
+-            throw InputException(
+-              "location_index exceeding costs matrix size for " + profile +
+-              " profile.");
+-          }
++    const auto c_m = _costs_matrices.find(profile);
+ 
+-          // Check for potential overflow in solution cost.
+-          const UserCost current_bound = check_cost_bound(c_m->second);
+-          const std::scoped_lock<std::mutex> lock(cost_bound_m);
+-          _cost_upper_bound =
+-            std::max(_cost_upper_bound,
+-                     utils::scale_from_user_cost(current_bound));
+-        } else {
+-          // Durations matrix will be used for costs.
+-          const UserCost current_bound = check_cost_bound(durations_m->second);
+-
+-          auto search = _max_cost_per_hour.find(profile);
+-          assert(search != _max_cost_per_hour.end());
+-          const auto max_cost_per_hour_for_profile = search->second;
+-
+-          const std::scoped_lock<std::mutex> lock(cost_bound_m);
+-          _cost_upper_bound =
+-            std::max(_cost_upper_bound,
+-                     max_cost_per_hour_for_profile *
+-                       utils::scale_from_user_duration(current_bound));
+-        }
++    if (c_m != _costs_matrices.end()) {
++      if (c_m->second.size() <= _max_matrices_used_index) {
++        throw InputException(
++          "location_index exceeding costs matrix size for " + profile +
++          " profile.");
+       }
+-    } catch (...) {
+-      const std::scoped_lock<std::mutex> lock(ep_m);
+-      ep = std::current_exception();
+-    }
+-  };
+ 
+-  std::vector<std::jthread> matrix_threads;
+-  matrix_threads.reserve(thread_profiles.size());
++      // Check for potential overflow in solution cost.
++      const UserCost current_bound = check_cost_bound(c_m->second);
++      _cost_upper_bound =
++        std::max(_cost_upper_bound,
++                 utils::scale_from_user_cost(current_bound));
++    } else {
++      // Durations matrix will be used for costs.
++      const UserCost current_bound = check_cost_bound(durations_m->second);
+ 
+-  for (const auto& profiles : thread_profiles) {
+-    matrix_threads.emplace_back(run_on_profiles, profiles);
+-  }
++      auto search = _max_cost_per_hour.find(profile);
++      assert(search != _max_cost_per_hour.end());
++      const auto max_cost_per_hour_for_profile = search->second;
+ 
+-  for (auto& t : matrix_threads) {
+-    t.join();
+-  }
+-
+-  if (ep != nullptr) {
+-    std::rethrow_exception(ep);
++      _cost_upper_bound =
++        std::max(_cost_upper_bound,
++                 max_cost_per_hour_for_profile *
++                   utils::scale_from_user_duration(current_bound));
++    }
+   }
+ }
+ 
+@@ -1261,54 +1219,6 @@ Solution Input::solve(const unsigned nb_searches,
+                                                           _end_loading)
+       .count();
+ 
+-  if (_geometry) {
+-    std::vector<std::jthread> threads;
+-    threads.reserve(sol.routes.size());
+-    std::exception_ptr ep = nullptr;
+-    std::mutex ep_m;
+-    std::counting_semaphore<MAX_ROUTING_THREADS> semaphore(
+-      std::min(MAX_ROUTING_THREADS, nb_thread));
+-
+-    auto run_routing = [this, &semaphore, &sol, &ep, &ep_m](std::size_t i) {
+-      semaphore.acquire();
+-      try {
+-        auto& route = sol.routes[i];
+-        const auto& profile = route.profile;
+-        auto rw = std::ranges::find_if(_routing_wrappers, [&](const auto& wr) {
+-          return wr->profile == profile;
+-        });
+-        if (rw == _routing_wrappers.end()) {
+-          throw InputException(
+-            "Route geometry request with non-routable profile " + profile +
+-            ".");
+-        }
+-        (*rw)->add_geometry(route);
+-      } catch (...) {
+-        const std::scoped_lock<std::mutex> lock(ep_m);
+-        ep = std::current_exception();
+-      }
+-      semaphore.release();
+-    };
+-
+-    for (std::size_t i = 0; i < sol.routes.size(); ++i) {
+-      threads.emplace_back(run_routing, i);
+-    }
+-
+-    for (auto& t : threads) {
+-      t.join();
+-    }
+-
+-    if (ep != nullptr) {
+-      std::rethrow_exception(ep);
+-    }
+-
+-    _end_routing = std::chrono::high_resolution_clock::now();
+-    auto routing = std::chrono::duration_cast<std::chrono::milliseconds>(
+-                     _end_routing - _end_solving)
+-                     .count();
+-
+-    sol.summary.computing_times.routing = routing;
+-  }
+ 
+   return sol;
+ }
+diff --git a/src/structures/vroom/tw_route.cpp b/src/structures/vroom/tw_route.cpp
+index 0739e67..110017b 100644
+--- a/src/structures/vroom/tw_route.cpp
++++ b/src/structures/vroom/tw_route.cpp
+@@ -1462,15 +1462,7 @@ template bool TWRoute::is_valid_addition_for_tw(
+   const Index last_rank,
+   bool check_max_load) const;
+ 
+-template bool TWRoute::is_valid_addition_for_tw(
+-  const Input& input,
+-  const Amount& delivery,
+-  const std::array<Index, 1>::const_iterator first_job,
+-  const std::array<Index, 1>::const_iterator last_job,
+-  const Index first_rank,
+-  const Index last_rank,
+-  bool check_max_load) const;
+-
++// WASI libc++ uses the same const iterator type for array and vector.
+ template bool TWRoute::is_valid_addition_for_tw(
+   const Input& input,
+   const Amount& delivery,
+@@ -1501,12 +1493,4 @@ TWRoute::replace(const Input& input,
+                  const Index first_rank,
+                  const Index last_rank);
+ 
+-template void
+-TWRoute::replace(const Input& input,
+-                 const Amount& delivery,
+-                 const std::array<Index, 1>::const_iterator first_job,
+-                 const std::array<Index, 1>::const_iterator last_job,
+-                 const Index first_rank,
+-                 const Index last_rank);
+-
+ } // namespace vroom

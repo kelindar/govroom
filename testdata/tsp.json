@@ -1,0 +1,5 @@
+{
+  "vehicles": [{"id": 9, "start_index": 0, "end_index": 0}],
+  "jobs": [{"id": 1, "location_index": 1}, {"id": 2, "location_index": 2}],
+  "matrices": {"car": {"durations": [[0, 1, 8], [8, 0, 2], [3, 8, 0]]}}
+}
