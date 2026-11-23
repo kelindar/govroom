@@ -2,6 +2,7 @@
   <img width="300" height="100" src=".github/logo.png" alt="vroom">
   <br>
   <img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8" alt="Go 1.25+">
+  <a href="https://github.com/kelindar/govroom/actions/workflows/test.yml"><img src="https://github.com/kelindar/govroom/actions/workflows/test.yml/badge.svg" alt="Tests"></a>
   <a href="https://pkg.go.dev/github.com/kelindar/govroom"><img src="https://pkg.go.dev/badge/github.com/kelindar/govroom.svg" alt="Go reference"></a>
   <a href="https://github.com/VROOM-Project/vroom/tree/v1.15.0"><img src="https://img.shields.io/badge/VROOM-1.15.0-blue" alt="VROOM 1.15.0"></a>
 </p>

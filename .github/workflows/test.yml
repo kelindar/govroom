@@ -1,0 +1,81 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  GOWORK: "off"
+
+jobs:
+  test:
+    name: Test without cgo (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            bench/go.sum
+
+      - name: Check library
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: Check benchmark module
+        working-directory: bench
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+
+  coverage:
+    name: Race tests and coverage
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Test library with coverage
+        run: |
+          go test -race -count=1 -covermode=atomic -coverprofile=profile.cov ./...
+          go tool cover -func=profile.cov | awk '/^total:/ { print "Go statement coverage " $NF }' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage to Coveralls
+        if: env.GITHUB_TOKEN != ''
+        uses: shogo82148/actions-goveralls@v1.11.2
+        with:
+          path-to-profile: profile.cov
+        env:
+          GITHUB_TOKEN: ${{ secrets.COVERALLS_TOKEN }}
