@@ -11,8 +11,6 @@ import (
 	"sync"
 
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
-	"github.com/tetratelabs/wazero/experimental"
 	"github.com/tetratelabs/wazero/imports/wasi_snapshot_preview1"
 	"github.com/tetratelabs/wazero/sys"
 )
@@ -35,10 +33,7 @@ func New(ctx context.Context) (*Solver, error) {
 		return nil, err
 	}
 
-	// wazero 1.12's compiler can trap while unwinding VROOM C++ exceptions.
-	config := wazero.NewRuntimeConfigInterpreter().
-		WithCoreFeatures(api.CoreFeaturesV2 | experimental.CoreFeaturesExceptionHandling).
-		WithCloseOnContextDone(true)
+	config := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
 	runtime := wazero.NewRuntimeWithConfig(ctx, config)
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
 		_ = runtime.Close(context.WithoutCancel(ctx))
@@ -113,7 +108,6 @@ func (s *Solver) Solve(ctx context.Context, problem any) ([]byte, error) {
 	var output bytes.Buffer
 	config := wazero.NewModuleConfig().
 		WithName("").
-		WithArgs("vroom", "-t", "1").
 		WithStdin(bytes.NewReader(input)).
 		WithStdout(&output).
 		WithSysWalltime().

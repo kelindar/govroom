@@ -248,13 +248,41 @@ Call `New` once for a service or batch of requests. Each solve gets a fresh WASM
 
 Each solve runs on one guest thread at VROOM's default exploration level. The embedded build covers matrix-based optimization. Routing backends, route geometry, and GLPK plan validation require other VROOM builds.
 
+wazero compiles VROOM to native code on supported hosts and uses its interpreter elsewhere. The WASM guest writes VROOM's structured errors before exiting its per-request instance.
+
+## Benchmarks
+
+### Compiled WASM vs native C++
+
+On these two delivery workloads, the embedded solver took **2.6× to 4.8×** as long as the native VROOM CLI. Both builds used VROOM v1.15.0 with one solver thread and the default exploration level. Both assigned every job and produced the same route counts and costs.
+
+| Workload | Go + wazero | Native C++ CLI | WASM / native |
+| --- | ---: | ---: | ---: |
+| 10 jobs, 1 vehicle | 7.01 ms | 2.73 ms | 2.6× |
+| 20 jobs, 2 vehicles | 29.45 ms | 6.10 ms | 4.8× |
+
+Times are medians over 15 timed solves per case after warm-up on WSL with an Intel Core i7-13700K. Each pair used identical pre-encoded JSON, with vehicle capacities and job time windows. The native CLI was built with GCC 16.2 at `-O3`, and its timings include starting a process and reading its output. The Go timings reuse one solver and include WASM instantiation for each request. Creating the Go solver took about 360 ms in that run, before timing began.
+
+### Running the Go benchmarks
+
+The separate [benchmark module](bench/) uses the same delivery workloads and reports latency, throughput, and allocations. It runs each workload with pre-encoded JSON and typed Go input. The typed cases include JSON encoding. [kelindar/bench](https://github.com/kelindar/bench)
+
+```sh
+cd bench
+go test ./...
+go run .
+go run . -n -bench solve/20-jobs
+```
+
+The first run saves a local baseline in `bench.gob`. Use `-n` to keep that baseline and `-bench` to select cases by name prefix.
+
 ## Building VROOM from source
 
-The repository includes the WASM binary. To regenerate it on Linux or WSL, install Git, GNU Make, WASI SDK 34.0, and Binaryen 133. Put `wasm-opt` on your PATH. [WASI SDK](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34) · [Binaryen](https://github.com/WebAssembly/binaryen/releases/tag/version_133)
+The repository includes the WASM binary. To regenerate it on Linux or WSL, install Git, GNU Make, GNU sed, and WASI SDK 34.0. [WASI SDK](https://github.com/WebAssembly/wasi-sdk/releases/tag/wasi-sdk-34)
 
 ```sh
 bash wasm/build.sh /path/to/wasi-sdk-34.0
 go test ./...
 ```
 
-The script checks out VROOM v1.15.0, runs matrix preparation and solver searches serially via the WASI patch, and translates C++ exception instructions for wazero's interpreter. [WASI patch](wasm/serial.patch) · [Third-party notices](wasm/licenses/)
+The script checks out VROOM v1.15.0, applies the single-threaded WASI patch, and builds a WASI entry point that reports errors without C++ exception unwinding. [WASI patch](wasm/serial.patch) · [Third-party notices](wasm/licenses/)

@@ -657,3 +657,21 @@ index 0739e67..110017b 100644
 -                 const Index last_rank);
 -
  } // namespace vroom
+diff --git a/src/utils/exception.h b/src/utils/exception.h
+index 76f9b36..36715d8 100644
+--- a/src/utils/exception.h
++++ b/src/utils/exception.h
+@@ -43,6 +43,13 @@ public:
+   explicit RoutingException(const std::string& message);
+ };
+
++[[noreturn]] void exit_with_error(const Exception& error);
++
++template <class Error>
++[[noreturn]] void fail(const std::string& message) {
++  exit_with_error(Error(message));
++}
++
+ } // namespace vroom
+
+ #endif
