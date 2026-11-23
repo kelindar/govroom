@@ -1,4 +1,4 @@
-package govroom_test
+package vroom_test
 
 import (
 	"context"
@@ -14,7 +14,7 @@ import (
 
 func TestSolver(t *testing.T) {
 	ctx := context.Background()
-	solver, err := govroom.New(ctx)
+	solver, err := vroom.New(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, solver.Close(ctx)) })
 
@@ -69,7 +69,7 @@ func TestSolver(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				output, err := solver.Solve(ctx, []byte(tc.input))
-				var failure *govroom.Error
+				var failure *vroom.Error
 				require.ErrorAs(t, err, &failure)
 				assert.Equal(t, tc.code, failure.Code)
 				assert.NotEmpty(t, failure.Message)
@@ -85,10 +85,10 @@ func TestLifecycle(t *testing.T) {
 	ctx := context.Background()
 	canceled, cancel := context.WithCancel(ctx)
 	cancel()
-	_, err := govroom.New(canceled)
+	_, err := vroom.New(canceled)
 	assert.ErrorIs(t, err, context.Canceled)
 
-	solver, err := govroom.New(ctx)
+	solver, err := vroom.New(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, solver.Close(ctx)) })
 
@@ -99,6 +99,51 @@ func TestLifecycle(t *testing.T) {
 	require.NoError(t, solver.Close(ctx))
 	_, err = solver.Solve(ctx, nil)
 	assert.ErrorContains(t, err, "solver is closed")
+}
+
+func TestInputFormats(t *testing.T) {
+	ctx := context.Background()
+	solver, err := vroom.New(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, solver.Close(ctx)) })
+
+	raw, err := os.ReadFile(filepath.Join("testdata", "tsp.json"))
+	require.NoError(t, err)
+	var object map[string]any
+	require.NoError(t, json.Unmarshal(raw, &object))
+
+	for _, tc := range []struct {
+		name  string
+		input any
+	}{
+		{"bytes", raw},
+		{"raw message", json.RawMessage(raw)},
+		{"string", string(raw)},
+		{"map", object},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output, err := solver.Solve(ctx, tc.input)
+			require.NoError(t, err)
+			var result solution
+			require.NoError(t, json.Unmarshal(output, &result))
+			assert.Zero(t, result.Code)
+			assert.Equal(t, 6, result.Summary.Cost)
+		})
+	}
+
+	t.Run("invalid raw JSON", func(t *testing.T) {
+		_, err := solver.Solve(ctx, json.RawMessage("{"))
+		var failure *vroom.Error
+		require.ErrorAs(t, err, &failure)
+		assert.Equal(t, uint32(2), failure.Code)
+	})
+
+	t.Run("encoding failure", func(t *testing.T) {
+		output, err := solver.Solve(ctx, make(chan int))
+		var unsupported *json.UnsupportedTypeError
+		assert.ErrorAs(t, err, &unsupported)
+		assert.Nil(t, output)
+	})
 }
 
 type solution struct {
@@ -118,7 +163,7 @@ type solution struct {
 	Unassigned []struct{ ID int }
 }
 
-func solve(t *testing.T, solver *govroom.Solver, name string) solution {
+func solve(t *testing.T, solver *vroom.Solver, name string) solution {
 	t.Helper()
 	input, err := os.ReadFile(filepath.Join("testdata", name))
 	require.NoError(t, err)

@@ -1,5 +1,5 @@
-// Package govroom runs VROOM vehicle routing optimization in WebAssembly.
-package govroom
+// Package vroom runs VROOM vehicle routing optimization in WebAssembly.
+package vroom
 
 import (
 	"bytes"
@@ -73,11 +73,32 @@ func (s *Solver) Close(ctx context.Context) error {
 	return err
 }
 
-// Solve accepts a VROOM JSON problem with custom travel matrices and returns
-// the VROOM JSON solution. It uses VROOM's default exploration level and one
-// guest thread. The returned bytes belong to the caller. Do not modify problem
-// until Solve returns. Cancel ctx to interrupt a solve.
-func (s *Solver) Solve(ctx context.Context, problem []byte) ([]byte, error) {
+// Solve accepts a problem with custom travel matrices and returns a VROOM JSON
+// solution. It passes []byte, json.RawMessage, and string to VROOM as JSON
+// text. Other values, including Problem and *Problem, use json.Marshal.
+// The returned bytes belong to the caller. Do not modify problem until Solve
+// returns. Cancel ctx to interrupt a solve.
+func (s *Solver) Solve(ctx context.Context, problem any) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var input []byte
+	switch problem := problem.(type) {
+	case nil:
+	case []byte:
+		input = problem
+	case json.RawMessage:
+		input = problem
+	case string:
+		input = []byte(problem)
+	default:
+		var err error
+		input, err = json.Marshal(problem)
+		if err != nil {
+			return nil, fmt.Errorf("encode VROOM problem: %w", err)
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -93,7 +114,7 @@ func (s *Solver) Solve(ctx context.Context, problem []byte) ([]byte, error) {
 	config := wazero.NewModuleConfig().
 		WithName("").
 		WithArgs("vroom", "-t", "1").
-		WithStdin(bytes.NewReader(problem)).
+		WithStdin(bytes.NewReader(input)).
 		WithStdout(&output).
 		WithSysWalltime().
 		WithSysNanotime()
