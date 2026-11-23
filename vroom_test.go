@@ -3,6 +3,7 @@ package vroom_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -73,6 +74,7 @@ func TestSolver(t *testing.T) {
 				require.ErrorAs(t, err, &failure)
 				assert.Equal(t, tc.code, failure.Code)
 				assert.NotEmpty(t, failure.Message)
+				assert.EqualError(t, err, fmt.Sprintf("VROOM error %d: %s", tc.code, failure.Message))
 				assert.Nil(t, output)
 			})
 		}
@@ -144,6 +146,25 @@ func TestInputFormats(t *testing.T) {
 		assert.ErrorAs(t, err, &unsupported)
 		assert.Nil(t, output)
 	})
+
+	t.Run("cancel during encoding", func(t *testing.T) {
+		request, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		output, err := solver.Solve(request, cancelOnMarshal{cancel: cancel})
+		assert.ErrorIs(t, err, context.Canceled)
+		assert.Nil(t, output)
+		assert.Equal(t, 6, solve(t, solver, "tsp.json").Summary.Cost)
+	})
+}
+
+type cancelOnMarshal struct {
+	cancel context.CancelFunc
+}
+
+func (c cancelOnMarshal) MarshalJSON() ([]byte, error) {
+	c.cancel()
+	return []byte("{}"), nil
 }
 
 type solution struct {
